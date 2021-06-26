@@ -58,6 +58,24 @@ let air ~(msg: string list) =
 
     | _ -> return "usage: !air on/off"
 
+let ping () =
+    Monitor.try_with
+        ~run:`Now
+        ~rest:`Log
+        (fun () ->
+            Tcp.with_connection
+                (Tcp.Where_to_connect.of_host_and_port
+                @@ Host_and_port.create ~host:"10.0.0.2" ~port:10002)
+                (fun sock _r w ->
+                    Writer.write w "HELLO";
+                    Writer.flushed w
+                    >>= (fun () ->
+                    Fd.close @@ Unix.Socket.fd sock)
+                    >>| fun () -> "paging...!"))
+        >>| function
+        | Ok s -> s
+        | Error _ -> "error"
+
 let check_command (message: Message.t) =
     if message.author.username <> "echo" && String.prefix message.content 1 = "!" then (
         mylog @@ sprintf "[DEBUG] recv: %s\n" message.content;
@@ -70,7 +88,7 @@ let check_command (message: Message.t) =
 
         let response =
             match cmd with
-            | "!ping" -> return "pong"
+            | "!ping" -> ping ()
             | "!paown" -> return "paaaooowwnnn :elephant:"
             | "!add" -> return @@ add ~msg:rest
             | "!air" -> air ~msg:rest
