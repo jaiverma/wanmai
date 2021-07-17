@@ -3,13 +3,6 @@ open Async
 open Disml
 open Models
 
-let mylog msg =
-    let stdout = Lazy.force Writer.stdout in
-    Writer.write stdout msg;
-
-    Writer.flushed stdout
-    >>> ignore
-
 let add ~(msg: string list) =
     let nums =  List.map ~f:int_of_string msg in
     if List.length nums <> 2 then "usage: !add <a> <b>"
@@ -32,53 +25,32 @@ let air ~(msg: string list) =
         | _ -> ""
     in
 
-    let msg_handler ~msg w =
-        Writer.write w msg;
-        Writer.flushed w
-    in
-
     match cmd with
     | "on" | "off" -> (
-        Monitor.try_with
-            ~run:`Now
-            ~rest:`Log
-            (fun () ->
-                Tcp.with_connection
-                    (Tcp.Where_to_connect.of_host_and_port
-                    @@ Host_and_port.create ~host:"127.0.0.1" ~port:10001)
-                    (fun sock _r w ->
-                        msg_handler ~msg:cmd w
-                        >>= (fun () ->
-                        Fd.close @@ Unix.Socket.fd sock)
-                        >>| fun () -> "done"))
-
-        >>| (function
+        Utils.send_tcp_msg ~host:"127.0.0.1" ~port:10001 ~f:(fun _r w ->
+            Writer.write w cmd;
+            Writer.flushed w
+            >>= fun () ->
+            return "done")
+        >>| function
         | Ok s -> s
-        | Error _ -> "error"))
+        | Error _ -> "error")
 
     | _ -> return "usage: !air on/off"
 
 let ping () =
-    Monitor.try_with
-        ~run:`Now
-        ~rest:`Log
-        (fun () ->
-            Tcp.with_connection
-                (Tcp.Where_to_connect.of_host_and_port
-                @@ Host_and_port.create ~host:"10.0.0.2" ~port:10002)
-                (fun sock _r w ->
-                    Writer.write w "HELLO";
-                    Writer.flushed w
-                    >>= (fun () ->
-                    Fd.close @@ Unix.Socket.fd sock)
-                    >>| fun () -> "paging...!"))
-        >>| function
-        | Ok s -> s
-        | Error _ -> "error"
+    Utils.send_tcp_msg ~host:"10.0.0.5" ~port:10002 ~f:(fun _r w ->
+            Writer.write w "HELLO";
+            Writer.flushed w
+            >>= fun () ->
+            return "paging...!")
+    >>| function
+    | Ok s -> s
+    | Error _ -> "error"
 
 let check_command (message: Message.t) =
     if message.author.username <> "echo" && String.prefix message.content 1 = "!" then (
-        mylog @@ sprintf "[DEBUG] recv: %s\n" message.content;
+        Utils.mylog @@ sprintf "[DEBUG] recv: %s\n" message.content;
 
         let (cmd, rest) =
             match String.split ~on:' ' message.content with
